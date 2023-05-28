@@ -1,0 +1,38 @@
+LABEL 'Improper File Path Retry'
+Display.InputDialog Title: $'''Input Data''' Message: $'''Open PCF Bank, then copy & paste Kit Number here. Add''' InputType: Display.InputType.SingleLine IsTopMost: True UserInput=> UserInput_Num
+SET Global_KN TO UserInput_Num
+Display.SelectFromListDialog.SelectFromList Title: $'''Identify Number Type''' Message: $'''Choose what item you are reviewing.''' List: $'''_KIT
+_MFG
+_PP''' IsTopMost: True AllowEmpty: False SelectedItem=> UserInput_Type
+# The following action prompts you to select an Excel file (*.xls*) that contains the table you want to extract.
+BLOCK 'Improper File Path'
+ON BLOCK ERROR all
+    GOTO 'Improper File Path Retry'
+END
+    Display.SelectFileDialog.SelectFile Title: $'''Select the excel file to extract Part #s from...''' InitialDirectory: $'''%EXCEL_PATH%\\%UserInput_Num%%UserInput_Type%''' FileFilter: $'''*.xls*''' IsTopMost: True CheckIfFileExists: True SelectedFile=> Selected_EXCEL_File ButtonPressed=> FileDialog_ButtonPressed
+END
+IF FileDialog_ButtonPressed <> $'''Cancel''' THEN
+    Excel.LaunchExcel.LaunchAndOpen Path: Selected_EXCEL_File Visible: True ReadOnly: True LoadAddInsAndMacros: False Instance=> Selected_Excel_Instance
+    ON ERROR REPEAT 1 TIMES WAIT 2
+    END
+    **REGION Get Part Numbers
+    # Get Kit Number
+    Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: Selected_Excel_Instance Name: $'''Kit'''
+    Excel.ReadFromExcel.ReadCell Instance: Selected_Excel_Instance StartColumn: $'''D''' StartRow: 1 ReadAsText: False CellValue=> Kit_Number
+    # Find Index of Part Number (PN).
+    Excel.FindAndReplace.FindSingle Instance: Selected_Excel_Instance TextToFind: $'''PN''' MatchCase: True MatchEntireCellContents: True SearchBy: Excel.SearchOrder.Columns FoundColumnIndex=> PN_ColumnIndex FoundRowIndex=> PN_RowIndex
+    # Get Part Numbers
+    Excel.GetFirstFreeRowOnColumn Instance: Selected_Excel_Instance Column: PN_ColumnIndex FirstFreeRowOnColumn=> FirstFreeRowOnColumn_B
+    DISABLE Excel.GetFirstFreeColumnRow Instance: Selected_Excel_Instance FirstFreeRow=> FirstFreeRow_PN
+    # ***** Add in something that checks if the part is stocking type 'D'. (Low Priority) *****
+    # *****Change this to also get the cost standard. (Low Priority)*****
+    Excel.ReadFromExcel.ReadCells Instance: Selected_Excel_Instance StartColumn: PN_ColumnIndex StartRow: PN_RowIndex EndColumn: PN_ColumnIndex EndRow: FirstFreeRowOnColumn_B ReadAsText: True FirstLineIsHeader: True RangeValue=> List_PartNumbers
+    Variables.ModifyDataTableItem DataTable: List_PartNumbers ColumnNameOrIndex: 0 RowIndex: List_PartNumbers.RowsCount - 1 Value: $'''Kit Number'''
+    Variables.AddRowToDataTable.AppendRowToDataTable DataTable: List_PartNumbers RowToAdd: Kit_Number
+    Excel.CloseExcel.Close Instance: Selected_Excel_Instance
+    Display.ShowMessageDialog.ShowMessage Title: $'''Excel Data''' Message: List_PartNumbers Icon: Display.Icon.Information Buttons: Display.Buttons.AbortRetryIgnore DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Msg_Display_Handler
+    **ENDREGION
+END
+IF Msg_Display_Handler = $'''Ignore''' THEN
+    CALL 'ProcessJDE.Form'
+END
